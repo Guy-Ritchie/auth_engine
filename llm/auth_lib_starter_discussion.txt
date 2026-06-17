@@ -1,0 +1,115 @@
+look, I'm trying to use python (3.13; through `uv`) and the idea is to implement an auth (authentication & authorization implementation) part for a simple web-app if you will (a simple html page, that accepts 2 input values, yeah? a user-name & password if you reckon, and then on successful sign-in, depending on authorization either of 2 pages are displayed), progressively working our way through different levels of auth-entication & auth-orization mechanisms. I don't have docker, so any database setups are going to be hard, so I reckon we can make do with perhaps something like a SQLite db?  
+
+So, this is what I need from you, discussions with you..
+We need to follow proper naming conventions, so the variable / class / function / method names have to be on-point, and properly linted through ruff (we'll have to add ruff linter, and configure it as a pre-commit hook!), have things like mypy for type-checking...
+
+Therefore, it has to:
+* ensure that our defined linting checks should pass before a commit is done! [naming conventions, code complexity is low, we've properly structured, design patterns following, OOP's following, well documented - through comments, proper doc-strings Google-Docs style, properly written Tests (unit, integration & regression tests -> regression not so much here, but unit-tests written properly with pytest = ofc, I don't know how to write / even implementing pytest based testing functionality...).
+* try and make sure that we, implement different crypto-graphic techniques throughout different authentication implementations.
+* ensure that we go over, and try to implement & learn all possible authorization mechanisms (role based / access based & all of the likes)…
+* for Authentication, also ensure that we try to implement / try to replicate something like OAuth / OAuth2 mechanisms.
+* ensure that at every time, the commits are separated properly and follow through with a scope based, conventional commit inspired commits & separation, etc.
+* be structured very well, and properly separated for concern; using dependency injection where-ever possible.
+* absolutely pivotal that we don't use any pre-built libraries and that we try to build things out from the first principles, for a better sense of understanding, and a better sense of python / comp-sci / crypto-graphic / web-security concepts.
+
+To achieve all this, I think we'll need to follow a step-by-step process.
+First, identify the pre-requisites, which are maybe things like; setup a uv workspace / project, with `uv init -p 3.13` and then possibly instantiating a python virtual environment for the same interpreter version; possibly adding all dependent packages, setting up the pre-commit hooks, linters, and so on..
+Then subsequently maybe decide and define the non-negotiables that have to be taken care of, at every step of the way. These are maybe the think about how the idea has to be separated maybe into modules / classes / whatever... And potentially if it's a reusable artifact and if it has to be taken separate, and so on... - from an implementation perspective; and maybe from a learning / increasing the knowledge / getting to a better understanding, have a structure around newer topics that I'm not comfortable with, to learn them, and get better at those topics.
+Maybe a structure like:
+- explanation in simple terms on what that means / what we're trying to get to know about..
+- a potentially relevant, maybe real-life analogous example that helps convey the intent of the explanation.
+- potential pitfalls / advantages of the concept if it's a continuity among a series of topics that we had laid out for learning..
+- maybe other related topics / variants that could be of interest, if there's such a tangent to it..
+- a zoomed-out perspective in the bigger picture of what we're trying to look at..
+- maybe perks of python, that could be relevant to the topic in focus.
+but ensure that for all those end up being simple, readable, in-structure; without using any pre-built / third party library, and instead tries to help us intuitively understand the concept. Ensure that we don't end up stealing the thunder away from the topic we're trying to learn into some new concept that appears to be intruiging and diverging our attention to another topic!
+
+So, in essence, I think you understand.
+Idea is for me to:
+- progressively build & learn about auth(-entication & -orization) mechanisms starting from simple password / key based authentication mechanisms to moderately simple mechanisms like JWT based implementations, upto pretty sophisticated mechanisms like OAuth2, etc... and different Authorization principles like RBAC / ABAC, etc.
+- and doing this through python project - built without any (if at all none) interference from pre-built third party / existing library implementations that abstract away the points that we intend to learn - but also ensuring that we follow really good, standard best practices for writing this code; and ensuring that we also have a harness built-around it to optimize & control the legibility of this code!
+- we start with the client side code, with as minimal effort as possible, to keep it at bay, and out of focus for the foreseeable future, until we need something more sophisticated due to some requirement from a feature implementation perspective... and then we begin from a simple project scaffold setup, preparing ourselves for the properly harnessed implementation; and then progressively working our way towards a good Auth(z/n) implementation project implementation.
+
+Does this sound good? Should we make the plan fool-proof, and prepare an artifact, perhaps a project proposal / a requirement specification document / some other asset that captures without missing anything, all important details in this regard?
+
+Do you think this is a good idea, and something worth pursuing? Shall we begin then?
+
+------  
+
+Yes, the standard HTTP lib should be good for us, atm.
+Sure, let's not include the RS256 in the roadmap, that we can revisit way later, if need be!
+Now, onto the current project structure & setup:
+
+```powershell
+PS C:\Users\rinzler\Documents\learning\python> git clone git@github.com:Guy-Ritchie/auth_engine.git
+Cloning into 'auth_engine'...
+warning: You appear to have cloned an empty repository.
+PS C:\Users\rinzler\Documents\learning\python> uv init auth_engine -p 3.13;
+Initialized project `auth-engine` at `C:\Users\rinzler\Documents\learning\python\auth_engine`
+PS C:\Users\rinzler\Documents\learning\python> ls
+
+    Directory: C:\Users\rinzler\Documents\learning\python
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d----          18-06-2026    00:41                auth_engine
+
+PS C:\Users\rinzler\Documents\learning\python> cd a
+Set-Location: Cannot find path 'C:\Users\rinzler\Documents\learning\python\a' because it does not exist.
+PS C:\Users\rinzler\Documents\learning\python> cd .\auth_engine\.
+PS C:\Users\rinzler\Documents\learning\python\auth_engine> ls
+
+    Directory: C:\Users\rinzler\Documents\learning\python\auth_engine
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+-a---          18-06-2026    00:41              5 .python-version
+-a---          18-06-2026    00:41             89 main.py
+-a---          18-06-2026    00:41            157 pyproject.toml
+-a---          18-06-2026    00:41              0 README.md
+
+PS C:\Users\rinzler\Documents\learning\python\auth_engine> git status
+On branch main
+
+No commits yet
+
+Untracked files:
+  (use "git add <file>..." to include in what will be committed)
+        .python-version
+        README.md
+        main.py
+        pyproject.toml
+
+nothing added to commit but untracked files present (use "git add" to track)
+PS C:\Users\rinzler\Documents\learning\python\auth_engine> uv venv -p 3.13
+Using CPython 3.13.14
+Creating virtual environment at: .venv
+Activate with: .venv\Scripts\activate
+PS C:\Users\rinzler\Documents\learning\python\auth_engine> .\.venv\Scripts\activate
+(auth_engine) PS C:\Users\rinzler\Documents\learning\python\auth_engine> ls
+
+    Directory: C:\Users\rinzler\Documents\learning\python\auth_engine
+
+Mode                 LastWriteTime         Length Name
+----                 -------------         ------ ----
+d----          18-06-2026    00:42                .venv
+-a---          18-06-2026    00:41              5 .python-version
+-a---          18-06-2026    00:41             89 main.py
+-a---          18-06-2026    00:41            157 pyproject.toml
+-a---          18-06-2026    00:41              0 README.md
+
+(auth_engine) PS C:\Users\rinzler\Documents\learning\python\auth_engine>
+```
+
+Some things I felt I left out, that I'm reaching out for, back again...
+- secrets checker pre-commit hook maybe, like thoughtworks/talisman (not sure if it's the right project, but just stating for an inspiration - since we'll probs be using base64 str's perhaps, for encryption stages maybe?); and an import order solver (I think ruff ought to take care of this automatically during formatting ig..)
+- usage of absolute imports, instead of relative imports within packages & modules everywhere - my preference, we ought to align on these.
+- I tend to think that the `__init__.py` files are not necessary, we've to align on what's the convention, and how we should do it!
+- and yes, we're to remember to perform data validations & checks at the receiving end, the way I see in some examples already in the document; nice!
+- for the schema to be represented by a class, are we just using a simple class / perhaps a dataclass?
+- what's the `T` type variables? are those generics? why do we need those?
+- will the UI need changes later on, when we're building OAuth / OAuth2 implementations then?
+- also, what about the Code-Grant flow? will that not be something we'll be touching then, as part of Authentication?
+- shouldn't the Client setup (login client, with those 2 other pages) be also done maybe, as part of the initial phase then?
+
+Showing the results of phase-0 partial results, waiting for other confirmations to proceed further!
