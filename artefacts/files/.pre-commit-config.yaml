@@ -1,0 +1,67 @@
+repos:
+  # ---------------------------------------------------------------------------
+  # Ruff: linting and formatting in one pass.
+  # Runs ruff --fix first (auto-corrects safe fixable issues), then ruff-format
+  # (opinionated formatter, replaces black). Both must pass before commit.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.15.17
+    hooks:
+      - id: ruff
+        args: [--fix]
+      - id: ruff-format
+
+  # ---------------------------------------------------------------------------
+  # Mypy: static type checking.
+  # Uses the project's own mypy install (via uv) to match the configured version.
+  # No additional stubs needed — we use stdlib only.
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/pre-commit/mirrors-mypy
+    rev: v2.1.0
+    hooks:
+      - id: mypy
+        args: [--strict, --ignore-missing-imports]
+        additional_dependencies: []
+
+  # ---------------------------------------------------------------------------
+  # detect-secrets: prevents accidental credential commits.
+  # Scans staged files for high-entropy strings, known secret patterns (API keys,
+  # tokens, private keys). Maintains a .secrets.baseline file that audited
+  # false-positives are acknowledged into — so base64 test fixtures can be
+  # explicitly allowed without disabling the hook.
+  #
+  # First-time setup (run once, commit the baseline):
+  #   uv run detect-secrets scan > .secrets.baseline
+  # To audit a flagged false-positive:
+  #   uv run detect-secrets audit .secrets.baseline
+  # ---------------------------------------------------------------------------
+  - repo: https://github.com/Yelp/detect-secrets
+    rev: v1.5.0
+    hooks:
+      - id: detect-secrets
+        args: [--baseline, .secrets.baseline]
+        exclude: |
+          (?x)^(
+            tests/fixtures/.*|
+            \.secrets\.baseline
+          )$
+
+  # ---------------------------------------------------------------------------
+  # pytest (unit tests only): fast gate — only runs tests/unit/.
+  # Integration tests are too slow for every commit; run them in CI or manually.
+  # Exit code 5 = "no tests collected" — treated as success here so Phase 0
+  # scaffold commits pass before any tests are written.
+  # ---------------------------------------------------------------------------
+  - repo: local
+    hooks:
+      - id: pytest-unit
+        name: pytest (unit tests only)
+        entry: >
+          uv run pytest tests/unit/ -q --tb=short --no-header
+          --no-cov-on-fail
+        language: system
+        pass_filenames: false
+        # exit code 5 = no tests found — acceptable during scaffold phase.
+        # Remove this once Phase 1 tests exist.
+        verbose: false
+        stages: [pre-commit]
