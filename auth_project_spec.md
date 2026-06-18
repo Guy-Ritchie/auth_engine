@@ -1,6 +1,8 @@
-# AuthForge — Project Specification & Learning Roadmap
+# AuthEngine — Project Specification & Learning Roadmap
 
 > **Tagline:** A from-first-principles implementation of Authentication & Authorization mechanisms in Python 3.13, built to understand — not just use.
+>
+> **Repo:** `auth_engine` | **Package:** `auth_engine` | **Python:** 3.13 via `uv`
 
 ---
 
@@ -12,551 +14,511 @@ The web app itself — a minimal HTML login page that routes users to one of two
 
 **What this is not:**
 - A production-ready auth library (use `python-jose`, `passlib`, `authlib` for that)
-- A tutorial that hands you code to copy
 - A project that reaches for `flask-login` or `fastapi-users` and calls it a day
 
 ---
 
-## 1. Non-Negotiables (apply at every phase)
-
-These are the invariants. No phase proceeds without them being satisfied.
+## 1. Non-Negotiables (invariants across every phase)
 
 ### 1.1 Code Quality
 
 | Concern | Tool | Config location |
 |---|---|---|
-| Linting + style | `ruff` | `pyproject.toml` → `[tool.ruff]` |
-| Type checking | `mypy` | `pyproject.toml` → `[tool.mypy]` |
+| Linting + style + import order | `ruff` | `pyproject.toml → [tool.ruff]` |
+| Type checking | `mypy` | `pyproject.toml → [tool.mypy]` |
+| Secret scanning | `detect-secrets` | `.secrets.baseline` |
 | Pre-commit enforcement | `pre-commit` | `.pre-commit-config.yaml` |
-| Test runner | `pytest` | `pyproject.toml` → `[tool.pytest.ini_options]` |
+| Test runner | `pytest` | `pyproject.toml → [tool.pytest.ini_options]` |
 | Coverage | `pytest-cov` | same |
 
-**Ruff rules to enforce (minimum):**
-- `E`, `W` — pycodestyle errors & warnings
-- `F` — pyflakes
-- `N` — pep8-naming (this is our naming enforcer)
-- `C90` — mccabe complexity (max complexity = 10)
-- `D` — pydocstyle (Google convention)
-- `ANN` — flake8-annotations (enforces type hints)
-- `S` — bandit security rules (critical for a security-focused project)
-- `SIM` — simplify
-- `UP` — pyupgrade
+**Ruff rule sets enabled:**
 
-**Naming conventions (enforced via ruff N-rules):**
-- Classes: `PascalCase`
-- Functions / methods: `snake_case`
-- Constants: `UPPER_SNAKE_CASE`
-- Private members: `_leading_underscore`
-- Type variables: `T`, `UserT` (single uppercase or PascalCase with T suffix)
+| Ruleset | Code | What it enforces |
+|---|---|---|
+| pycodestyle | `E`, `W` | formatting, whitespace, line length |
+| pyflakes | `F` | undefined names, unused imports |
+| pep8-naming | `N` | naming conventions (see below) |
+| mccabe | `C90` | cyclomatic complexity ≤ 10 per function |
+| pydocstyle | `D` | Google-convention docstrings |
+| annotations | `ANN` | type hints on all function signatures |
+| bandit | `S` | security anti-patterns |
+| simplify | `SIM` | redundant constructs |
+| pyupgrade | `UP` | modern Python 3.13 syntax |
+| isort | `I` | import ordering (stdlib → third-party → local) |
+| tidy-imports | `TID` | `TID252` bans relative imports |
 
-### 1.2 Commit Convention
+**Naming conventions (enforced via N-rules):**
 
-Commits follow [Conventional Commits](https://www.conventionalcommits.org/) with scopes tied to the project module being touched:
+| Construct | Convention | Example |
+|---|---|---|
+| Classes | `PascalCase` | `PasswordAuthenticator` |
+| Functions / methods | `snake_case` | `verify_credentials` |
+| Constants | `UPPER_SNAKE_CASE` | `MAX_LOGIN_ATTEMPTS` |
+| Private members | `_leading_underscore` | `_hash_password` |
+| Type variables | `T` or `PascalCaseT` | `T`, `UserT`, `EntityT` |
+| Modules / packages | `snake_case` | `auth_engine.crypto.hashing` |
 
+### 1.2 Import Convention
+
+**Absolute imports only, everywhere.** No relative imports.
+
+```python
+# Correct
+from auth_engine.crypto.hashing import hash_password
+
+# Wrong — banned by ruff TID252
+from .hashing import hash_password
+from ..domain.user import User
 ```
-<type>(<scope>): <short imperative summary>
 
-[optional body]
+Why: absolute imports make the dependency graph explicit at a glance. You always know exactly where a symbol comes from without counting dots.
 
-[optional footer: BREAKING CHANGE, refs, closes]
+### 1.3 `__init__.py` Convention
+
+Every package directory has an `__init__.py`. It serves two purposes:
+
+1. Makes the directory a proper Python package (required for absolute imports to resolve correctly with the src layout)
+2. Defines the **public API** of that package — what's importable from the outside
+
+```python
+# src/auth_engine/crypto/__init__.py
+# Public API for the crypto package.
+# Internal modules (hashing, hmac, encoding) are implementation details.
+# Consumers import from auth_engine.crypto, not from auth_engine.crypto.hashing.
+
+from auth_engine.crypto.hashing import hash_password, verify_password
+from auth_engine.crypto.comparison import constant_time_equal
+
+__all__ = ["hash_password", "verify_password", "constant_time_equal"]
 ```
+
+Phase 0 `__init__.py` files are empty — they'll be populated as each module is built.
+
+### 1.4 Data Validation
+
+Validate at the **boundary** — the point where untrusted data enters the system. That means:
+
+- HTTP request bodies (form data, headers, cookies)
+- Data read from the database before constructing domain objects
+- Any function whose callers are external to the package
+
+Internal functions between trusted, typed components do not need defensive validation — mypy + the type system handles that.
+
+### 1.5 Domain Models
+
+All domain models are **frozen dataclasses with `__slots__`** — immutable value objects.
+
+```python
+from dataclasses import dataclass
+
+@dataclass(frozen=True, slots=True)
+class User:
+    """Represents an authenticated identity in the system.
+
+    Attributes:
+        user_id: Unique identifier (UUID string).
+        username: Display name and login credential.
+        password_hash: PBKDF2 hash of the user's password. Never plaintext.
+        role: The role assigned to this user, determining authorization.
+    """
+    user_id: str
+    username: str
+    password_hash: str
+    role: str
+```
+
+`frozen=True` — instances cannot be mutated after creation. Prevents accidental state corruption.
+`slots=True` — attributes declared upfront, no `__dict__`. Faster attribute access, lower memory.
+
+### 1.6 Type Variables / Generics
+
+Type variables (`T`) are how you write functions or classes that work with *any* type while still being correctly type-checked. They are generics.
+
+They enter this project in Phase 1 when we write a `Repository[T]` base class:
+
+```python
+from typing import TypeVar, Generic
+
+EntityT = TypeVar("EntityT")
+
+class Repository(Generic[EntityT]):
+    """Base repository — concrete subclasses bind EntityT to a domain type."""
+
+    def find_by_id(self, entity_id: str) -> EntityT | None: ...
+```
+
+`UserRepository(Repository[User])` — mypy knows `find_by_id` returns `User | None`.
+`SessionRepository(Repository[Session])` — mypy knows `find_by_id` returns `Session | None`.
+
+Without the type variable, you'd have to write `find_by_id` three separate times (once per entity) or lose type safety by returning `object`. Don't worry about this until Phase 1 introduces the base class.
+
+### 1.7 Documentation
+
+- Every **public** class, function, and method: Google-style docstring
+- Every **module**: module-level docstring explaining its single responsibility
+- Complex or non-obvious logic: inline `# comment` explaining *why*, not *what*
+- `# TODO(PhaseN): description` for deferred work — never bare `# TODO`
+
+### 1.8 Testing
+
+| Category | Scope | Location | Pre-commit? |
+|---|---|---|---|
+| Unit | Single function / method, all branches, no I/O | `tests/unit/` | Yes (fast gate) |
+| Integration | Multi-component flow (e.g., full login → session → dashboard) | `tests/integration/` | No (run manually / CI) |
+| Regression | Captured bugs, found-in-review edge cases | `tests/regression/` | No |
+
+Test function naming: `test_<subject>_<condition>_<expected_outcome>`
+
+```python
+def test_hash_password_with_empty_string_raises_value_error() -> None: ...
+def test_verify_hmac_with_wrong_key_returns_false() -> None: ...
+def test_login_with_valid_credentials_sets_session_cookie() -> None: ...
+```
+
+### 1.9 Commit Convention
+
+Format: `<type>(<scope>): <short imperative summary>`
 
 **Types:** `feat`, `fix`, `refactor`, `test`, `docs`, `chore`, `style`, `perf`
 
-**Scopes (defined per phase):**
-- `scaffold` — project setup, tooling, pre-commit
-- `crypto` — cryptographic primitives
-- `auth-basic` — password/key based authentication
-- `auth-session` — session-based auth
-- `auth-token` — token-based (HMAC, JWT)
-- `auth-oauth` — OAuth / OAuth2 simulation
-- `authz-rbac` — role-based access control
-- `authz-abac` — attribute-based access control
-- `authz-pbac` — policy-based access control
-- `ui` — client-side HTML/CSS changes
-- `db` — SQLite schema / migrations
-- `test` — test additions or fixes
-- `infra` — pre-commit, CI, config
+**Scopes:**
 
-Example: `feat(auth-token): implement HS256 JWT signing and verification from scratch`
-
-### 1.3 Documentation
-
-- Every public class, function, and method gets a **Google-style docstring**.
-- Every module gets a module-level docstring explaining its responsibility.
-- Complex logic gets **inline comments** explaining *why*, not *what*.
-- No orphan code — if it exists, it's explained.
-
-**Google-style docstring shape:**
-```python
-def verify_hmac(message: bytes, signature: bytes, key: bytes) -> bool:
-    """Verify an HMAC-SHA256 signature against a message and secret key.
-
-    Uses a constant-time comparison to prevent timing attacks.
-
-    Args:
-        message: The original plaintext message bytes.
-        signature: The HMAC digest to verify against.
-        key: The shared secret key bytes.
-
-    Returns:
-        True if the signature is valid, False otherwise.
-
-    Raises:
-        ValueError: If message, signature, or key is empty.
-    """
-```
-
-### 1.4 Testing
-
-Every non-trivial unit gets tests. Tests are not an afterthought.
-
-**Test categories:**
-
-| Category | What it tests | Location |
-|---|---|---|
-| Unit | Single function / method in isolation, all branches | `tests/unit/` |
-| Integration | Multiple components working together (e.g. auth flow end-to-end) | `tests/integration/` |
-| Regression | Captured bugs, edge cases found in review | `tests/regression/` |
-
-**pytest conventions:**
-- Test files: `test_<module_name>.py`
-- Test classes: `Test<ClassName>` (grouped by subject)
-- Test functions: `test_<what>_<when>_<expected>` (e.g. `test_verify_hmac_with_wrong_key_returns_false`)
-- Fixtures in `conftest.py` at the appropriate level
-- No magic — every test is readable in isolation
-- Parametrize for equivalence classes: `@pytest.mark.parametrize`
-
-### 1.5 No Third-Party Abstractions for Core Logic
-
-The **only** allowed third-party packages are:
-
-| Package | Why allowed |
+| Scope | Phase |
 |---|---|
-| `pytest`, `pytest-cov` | Test runner infrastructure — not auth logic |
-| `ruff`, `mypy`, `pre-commit` | Dev tooling |
-| `uv` | Package / env manager |
+| `scaffold` | 0 — project setup |
+| `infra` | 0 — tooling, pre-commit, CI config |
+| `ui` | 0 — HTML stubs, later OAuth consent screen |
+| `db` | 1 — SQLite schema, repositories |
+| `domain` | 1 — dataclasses, domain models |
+| `crypto` | 2 — hashing, HMAC, encoding |
+| `auth-basic` | 3 — password authentication |
+| `auth-session` | 4 — session-based auth |
+| `auth-token` | 5, 6 — HMAC token, JWT |
+| `auth-oauth` | 9 — OAuth2 authorization code flow |
+| `authz-rbac` | 7 — role-based access control |
+| `authz-abac` | 8 — attribute-based access control |
+| `authz-pbac` | 10 — policy-based access control |
+| `test` | any — test additions independent of feature commits |
 
-Crypto, hashing, encoding, token generation, session management, HTTP handling — **all from stdlib only** (`hashlib`, `hmac`, `secrets`, `sqlite3`, `http.server`, `json`, `base64`, `struct`, `time`, `os`, `uuid`).
+### 1.10 No Third-Party Abstractions for Core Logic
 
-This constraint is the entire point. When you later reach for `python-jose`, you will know exactly what it's doing underneath.
+| Allowed | Why |
+|---|---|
+| `pytest`, `pytest-cov` | Test infrastructure — not auth logic |
+| `ruff`, `mypy`, `pre-commit`, `detect-secrets` | Dev tooling |
+| `uv` | Package / env management |
+
+Everything else — crypto, hashing, token generation, session management, HTTP — stdlib only: `hashlib`, `hmac`, `secrets`, `sqlite3`, `http.server`, `json`, `base64`, `struct`, `time`, `os`, `uuid`, `dataclasses`, `typing`.
 
 ---
 
 ## 2. Project Structure
 
 ```
-authforge/
-├── pyproject.toml                  # uv + ruff + mypy + pytest config
-├── .pre-commit-config.yaml         # ruff, mypy, pytest on staged files
-├── .python-version                 # 3.13
+auth_engine/                         ← git root
+├── pyproject.toml
+├── .pre-commit-config.yaml
+├── .secrets.baseline                ← detect-secrets audit file (committed)
+├── .python-version                  ← 3.13
 ├── README.md
+├── llm/                             ← LLM conversation logs (reference only)
 │
 ├── src/
-│   └── authforge/
+│   └── auth_engine/
 │       ├── __init__.py
 │       │
-│       ├── crypto/                 # Phase 2 — all cryptographic primitives
+│       ├── crypto/                  ← Phase 2: cryptographic primitives
 │       │   ├── __init__.py
-│       │   ├── hashing.py          # password hashing (SHA-256, bcrypt-manual, PBKDF2)
-│       │   ├── hmac.py             # HMAC implementation
-│       │   ├── encoding.py         # base64url, hex utils
-│       │   └── comparison.py      # constant-time comparison
+│       │   ├── hashing.py           ← SHA-256, salted hash, PBKDF2
+│       │   ├── hmac.py              ← HMAC-SHA256
+│       │   ├── encoding.py          ← base64url encode/decode
+│       │   └── comparison.py        ← constant-time comparison
 │       │
-│       ├── db/                     # SQLite layer
+│       ├── db/                      ← Phase 1: SQLite persistence layer
 │       │   ├── __init__.py
-│       │   ├── connection.py       # connection factory, context manager
-│       │   ├── migrations.py       # schema versioning (manual, no ORM)
-│       │   └── repositories/       # one repo per entity
+│       │   ├── connection.py        ← connection factory + context manager
+│       │   ├── migrations.py        ← sequential SQL migration runner
+│       │   └── repositories/
 │       │       ├── __init__.py
+│       │       ├── base.py          ← Repository[T] generic base
 │       │       ├── user_repository.py
 │       │       ├── session_repository.py
 │       │       └── token_repository.py
 │       │
-│       ├── domain/                 # Pure domain models — no I/O
+│       ├── domain/                  ← Phase 1: pure domain models (no I/O)
 │       │   ├── __init__.py
-│       │   ├── user.py             # User, Role, Permission dataclasses
-│       │   ├── session.py          # Session dataclass
-│       │   └── token.py            # TokenClaims, TokenHeader dataclasses
+│       │   ├── user.py              ← User, Role (frozen dataclasses)
+│       │   ├── session.py           ← Session
+│       │   └── token.py             ← TokenClaims, TokenHeader
 │       │
-│       ├── auth/                   # Authentication mechanisms (one module per phase)
+│       ├── auth/                    ← Phases 3–9: authentication mechanisms
 │       │   ├── __init__.py
-│       │   ├── interfaces.py       # AuthenticatorProtocol — the DI contract
+│       │   ├── interfaces.py        ← AuthenticatorProtocol (DI contract)
 │       │   ├── basic/
-│       │   │   ├── __init__.py
 │       │   │   └── password_authenticator.py
 │       │   ├── session/
-│       │   │   ├── __init__.py
 │       │   │   └── session_authenticator.py
 │       │   ├── token/
-│       │   │   ├── __init__.py
 │       │   │   ├── hmac_token.py
-│       │   │   └── jwt.py          # HS256 JWT from scratch
-│       │   └── oauth/
-│       │       ├── __init__.py
+│       │   │   └── jwt.py
+│       │   └── oauth/               ← Phase 9: OAuth2 authorization code flow
 │       │       ├── authorization_server.py
 │       │       ├── token_endpoint.py
 │       │       └── resource_server.py
 │       │
-│       ├── authz/                  # Authorization mechanisms
+│       ├── authz/                   ← Phases 7–10: authorization mechanisms
 │       │   ├── __init__.py
-│       │   ├── interfaces.py       # AuthorizerProtocol
+│       │   ├── interfaces.py        ← AuthorizerProtocol
 │       │   ├── rbac/
-│       │   │   ├── __init__.py
 │       │   │   └── role_authorizer.py
 │       │   ├── abac/
-│       │   │   ├── __init__.py
 │       │   │   └── attribute_authorizer.py
 │       │   └── pbac/
-│       │       ├── __init__.py
 │       │       └── policy_authorizer.py
 │       │
-│       ├── web/                    # Minimal HTTP server (stdlib http.server)
+│       ├── web/                     ← Phase 0+: HTTP server + routing
 │       │   ├── __init__.py
-│       │   ├── server.py           # RequestHandler subclass
-│       │   ├── router.py           # path → handler dispatch
-│       │   ├── request.py          # parsed Request dataclass
-│       │   └── response.py         # Response builder
+│       │   ├── server.py            ← HTTPServer entry point
+│       │   ├── router.py            ← path → handler dispatch table
+│       │   ├── request.py           ← parsed Request dataclass
+│       │   └── response.py          ← Response builder helpers
 │       │
-│       └── ui/                     # Static HTML templates (minimal)
+│       └── ui/                      ← Static HTML (not a Python package)
 │           ├── login.html
 │           ├── dashboard_admin.html
-│           └── dashboard_user.html
+│           └── dashboard_viewer.html
 │
 └── tests/
-    ├── conftest.py                 # shared fixtures (in-memory SQLite, test users)
+    ├── conftest.py                  ← shared fixtures
     ├── unit/
+    │   ├── conftest.py
     │   ├── crypto/
     │   ├── auth/
     │   └── authz/
     ├── integration/
-    │   ├── test_login_flow.py
-    │   └── test_authorization_flow.py
     └── regression/
-        └── .gitkeep
+```
+
+**Why `src/` layout?** With a flat layout, `import auth_engine` in tests resolves to the local directory before the installed package — meaning tests can accidentally pass against source files rather than the installed package. The `src/` layout forces `auth_engine` to be installed (even in editable mode via `uv pip install -e .`) before it's importable, so tests always run against the real installed package. This catches import-related bugs that a flat layout hides.
+
+---
+
+## 3. UI Evolution by Phase
+
+| Phase | What the UI needs |
+|---|---|
+| 0 | `login.html`, `dashboard_admin.html`, `dashboard_viewer.html` — static stubs, no logic |
+| 3 | Login form POST works — server validates credentials and redirects |
+| 4 | Session cookie set on login; logout link works |
+| 7 | Admin vs viewer routing based on role — both dashboards reachable |
+| 9 | OAuth2 consent screen: `consent.html` — new file; redirect landing page added to router |
+
+The UI is deliberately minimal and changes only when a new auth feature *requires* it.
+
+---
+
+## 4. Phase-by-Phase Roadmap
+
+### Phase 0 — Scaffold
+
+**Scope tags:** `scaffold`, `infra`, `ui`
+
+**Build:**
+- Migrate from flat layout to `src/auth_engine/` package structure
+- `pyproject.toml` fully configured (ruff, mypy, pytest, coverage)
+- `.pre-commit-config.yaml` with ruff, mypy, detect-secrets, pytest-unit hooks
+- `.secrets.baseline` generated and committed
+- All `__init__.py` stubs in place
+- Three HTML stubs in `src/auth_engine/ui/`
+- `server.py` serving static HTML from `ui/` — GET `/login`, `/dashboard`, `/dashboard/admin`; POST `/login` stub
+
+**Exit criteria:** `pre-commit run --all-files` passes clean. `uv run python -m auth_engine.web.server` serves `login.html` at `http://127.0.0.1:8080/login`.
+
+**Commits (in order):**
+```
+chore(scaffold): migrate to src layout, remove flat main.py
+chore(infra): configure ruff, mypy, detect-secrets, pytest in pyproject.toml
+chore(infra): add pre-commit hooks for ruff, mypy, detect-secrets, pytest-unit
+chore(infra): generate detect-secrets baseline
+feat(ui): add login and dashboard HTML stubs
+feat(scaffold): add minimal stdlib HTTP server serving static UI
 ```
 
 ---
 
-## 3. Learning Roadmap (Phase-by-phase)
+### Phase 1 — Domain + DB Layer
 
-Each phase has: a **what you'll build**, a **what you'll learn**, and a **commit scope**.
-
----
-
-### Phase 0 — Scaffold (`scope: scaffold`, `scope: infra`)
+**Scope tags:** `domain`, `db`
 
 **Build:**
-- `uv init -p 3.13` workspace
-- `pyproject.toml` with all dev deps declared
-- `ruff` configured with the rule set above
-- `mypy` in strict mode
-- `pre-commit` hooks: ruff → mypy → pytest (fast subset)
-- Initial SQLite connection + schema migration runner
-- Minimal HTTP server that returns 200 OK
+- `User`, `Role`, `Session`, `TokenClaims` as frozen dataclasses
+- SQLite schema: `users`, `roles`, `permissions`, `user_roles`, `sessions`
+- Migration runner: `schema_version` table + sequential SQL files
+- `Repository[T]` generic base; `UserRepository`, `SessionRepository`
+- Dependency injection: repositories constructed at app startup, passed down
 
-**Learn:**
-- How `uv` resolves and locks deps differently from `pip`
-- What pre-commit hooks actually run and when
-- Why `mypy --strict` is painful and necessary
-
-**Non-negotiable exits:** `pre-commit run --all-files` passes. Server boots. DB creates schema on first run.
+**Learn:** repository pattern, DI without a framework, SQLite quirks, frozen dataclasses, type variables (introduced here)
 
 ---
 
-### Phase 1 — Domain + DB Layer (`scope: db`)
+### Phase 2 — Cryptographic Primitives
+
+**Scope tag:** `crypto`
+
+**Build:** `hashing.py`, `hmac.py`, `encoding.py`, `comparison.py`
+
+**Learn:** hash functions, salting, PBKDF2, HMAC inner/outer pad, timing attacks, base64url
+
+---
+
+### Phase 3 — Password Authentication
+
+**Scope tag:** `auth-basic`
+
+**Build:** `PasswordAuthenticator`, POST `/login` wired to real credential check, redirect to dashboard on success
+
+**Learn:** what authentication means precisely, credential stuffing vs brute-force, why we don't store plaintext
+
+---
+
+### Phase 4 — Session-Based Auth
+
+**Scope tag:** `auth-session`
+
+**Build:** `SessionAuthenticator`, `secrets.token_urlsafe`, session cookie set/read, session expiry + `/logout`
+
+**Learn:** stateful sessions, CSPRNG vs PRNG, cookie flags (`HttpOnly`, `Secure`, `SameSite`), session fixation
+
+---
+
+### Phase 5 — HMAC Token Auth
+
+**Scope tag:** `auth-token`
+
+**Build:** stateless signed token (`payload + HMAC`), `TokenAuthenticator` issues + verifies without DB lookup
+
+**Learn:** stateful vs stateless tradeoff, why the server can trust the token, token replay
+
+---
+
+### Phase 6 — JWT from Scratch
+
+**Scope tag:** `auth-token`
+
+**Build:** `JwtBuilder` + `JwtVerifier`, HS256, standard claims (`iss sub exp iat jti`), full base64url encoding
+
+**Learn:** JWT structure (three parts), `alg: none` vulnerability, `jti` for one-time tokens
+
+---
+
+### Phase 7 — RBAC
+
+**Scope tag:** `authz-rbac`
+
+**Build:** `RoleAuthorizer`, `@requires_permission` decorator, `admin` + `viewer` roles seeded in DB, routing diverges by role
+
+**Learn:** authentication vs authorization, Users → Roles → Permissions indirection, least privilege
+
+---
+
+### Phase 8 — ABAC
+
+**Scope tag:** `authz-abac`
+
+**Build:** `AttributeAuthorizer`, policy as Python predicate, subject/resource/environment attributes
+
+**Learn:** why RBAC fails on context-dependent access, four ABAC pillars, PDP vs PEP
+
+---
+
+### Phase 9 — OAuth2 (Authorization Code Flow + PKCE)
+
+**Scope tags:** `auth-oauth`, `ui`
 
 **Build:**
-- `User`, `Role`, `Permission` dataclasses (frozen, slots)
-- SQLite schema: `users`, `roles`, `permissions`, `user_roles` tables
-- Repository pattern: `UserRepository` with typed methods
-- Manual migration versioning (a `schema_version` table + sequential SQL files)
-- Dependency injection: repositories are injected, never instantiated inside business logic
-
-**Learn:**
-- Why we separate domain models from persistence models
-- Repository pattern vs Active Record — and why the former wins for testability
-- Dependency injection without a framework (just constructor injection)
-- SQLite quirks (no `BOOLEAN`, `INTEGER PRIMARY KEY` autoincrement, foreign key enforcement off by default)
-
----
-
-### Phase 2 — Cryptographic Primitives (`scope: crypto`)
-
-**Build:**
-- `hashing.py`: SHA-256 (via `hashlib`), salted hash, PBKDF2 wrapper (via `hashlib.pbkdf2_hmac`)
-- `hmac.py`: HMAC-SHA256 built on `hmac` stdlib (understand the inner/outer pad construction)
-- `encoding.py`: base64url encode/decode (no padding issues — implement the padding fix)
-- `comparison.py`: constant-time compare (explain why `==` leaks timing)
-
-**Learn:**
-- What a hash function is and why it's one-way
-- Why salting exists (rainbow table attack)
-- Why PBKDF2 / key stretching exists (brute-force cost)
-- HMAC: why you can't just `SHA256(key + message)` (length extension attack)
-- Timing attacks: how comparing byte-by-byte leaks information and how `hmac.compare_digest` fixes it
-- base64url vs base64 and why JWT uses the URL-safe variant
-
-**Cryptographic progression chart:**
-
-```
-Plaintext password  →  SHA-256(password)         [broken: no salt]
-                    →  SHA-256(salt + password)   [better: rainbow table resistant]
-                    →  PBKDF2(password, salt, N)  [good: expensive to brute-force]
-```
-
----
-
-### Phase 3 — Basic Password Authentication (`scope: auth-basic`)
-
-**Build:**
-- `PasswordAuthenticator`: accepts `(username, password)`, returns `User | None`
-- HTML login form → POST handler → authenticator → redirect
-- Store PBKDF2 hashes in SQLite, never plaintext
-
-**Learn:**
-- Credential stuffing vs brute-force — different threat, different defence
-- Why HTTP Basic Auth (base64 in header) is not the same as password auth
-- What "authentication" means precisely: asserting identity
-
----
-
-### Phase 4 — Session-Based Auth (`scope: auth-session`)
-
-**Build:**
-- `SessionAuthenticator`: generates a cryptographically random session token (`secrets.token_urlsafe`)
-- `SessionRepository`: stores `(session_id, user_id, expires_at)` in SQLite
-- Set/read session cookie in HTTP response/request
-- Session expiry + invalidation (logout)
-
-**Learn:**
-- What a session is (server-side state, client holds only a reference)
-- Why `random` is wrong and `secrets` is right (CSPRNG vs PRNG)
-- Cookie flags: `HttpOnly`, `Secure`, `SameSite` — what each prevents
-- Session fixation attack
-
----
-
-### Phase 5 — HMAC Token Auth (`scope: auth-token`)
-
-**Build:**
-- Stateless token: `user_id + expires_at` payload, HMAC-SHA256 signed
-- `TokenAuthenticator`: issues and verifies tokens
-- No DB lookup on verify — everything in the token (contrast with Phase 4)
-
-**Learn:**
-- Stateful (session) vs stateless (token) — tradeoffs
-- Why the server can trust the token without a DB lookup (HMAC guarantees integrity + origin)
-- Token replay attacks and expiry as partial mitigation
-
----
-
-### Phase 6 — JWT from Scratch (`scope: auth-token`)
-
-**Build:**
-- `JwtBuilder`: constructs `base64url(header).base64url(payload).signature`
-- `JwtVerifier`: splits, decodes, re-signs header+payload, constant-time compares
-- HS256 only (HMAC-SHA256) — RS256 is a stretch goal
-- Standard claims: `iss`, `sub`, `exp`, `iat`, `jti`
-
-**Learn:**
-- Why JWT is just "a signed JSON object with a standard structure" — demystify the format
-- The three parts: header, payload, signature — each independently base64url-encoded
-- `alg: none` vulnerability — why you must reject tokens with no algorithm
-- `jti` (JWT ID) for one-time-use tokens
-
----
-
-### Phase 7 — Role-Based Access Control (`scope: authz-rbac`)
-
-**Build:**
-- `Role`, `Permission` domain objects
-- `RoleAuthorizer`: given `(user, required_permission)`, returns `bool`
-- Decorator / middleware pattern: `@requires_permission("admin:read")`
-- Roles seeded in DB: `admin`, `viewer`
-
-**Learn:**
-- Authentication vs Authorization — precisely: "who are you" vs "what can you do"
-- RBAC model: Users → Roles → Permissions (not Users → Permissions directly)
-- Why flat permission lists don't scale and roles are the indirection layer
-- Principle of least privilege
-
----
-
-### Phase 8 — Attribute-Based Access Control (`scope: authz-abac`)
-
-**Build:**
-- `AttributeAuthorizer`: evaluates `policy(subject_attrs, resource_attrs, env_attrs) → bool`
-- Policies expressed as simple Python predicates (no DSL yet)
-- Example: `user.department == resource.owner_department and env.time < 18:00`
-
-**Learn:**
-- Why RBAC fails when access depends on context (time, location, data attributes)
-- ABAC: Subject + Resource + Environment + Action — the four pillars
-- Policy decision point (PDP) vs policy enforcement point (PEP)
-- XACML as the enterprise spec (understand conceptually, don't implement)
-
----
-
-### Phase 9 — OAuth2 Simulation (`scope: auth-oauth`)
-
-**Build (Authorization Code Flow, simulated within the same process):**
 - `AuthorizationServer`: issues authorization codes
-- `TokenEndpoint`: exchanges code for access token + refresh token
-- `ResourceServer`: validates bearer token on protected endpoints
-- Simulated "third-party client" (another route) performing the redirect dance
+- `TokenEndpoint`: exchanges code → access token + refresh token
+- `ResourceServer`: validates bearer tokens on protected routes
+- Simulated "client" making the redirect dance within the same server
+- `consent.html` UI: scope approval screen
+- PKCE: code challenge + code verifier exchange
 
-**Learn:**
-- Why OAuth2 exists: delegated authorization without sharing passwords
-- The four roles: Resource Owner, Client, Authorization Server, Resource Server
-- Authorization Code Flow step-by-step (the redirect → code → token exchange)
-- Why PKCE (Proof Key for Code Exchange) exists — code interception attack
-- Access token vs refresh token — different lifetimes, different purposes
-- OAuth2 ≠ authentication (that's OpenID Connect on top)
+**Learn:** why OAuth2 exists (delegated auth without sharing passwords), four roles, authorization code flow step-by-step, what PKCE prevents (code interception), access token vs refresh token, OAuth2 ≠ authentication (that's OIDC)
 
 ---
 
-### Phase 10 — Policy-Based Access Control (`scope: authz-pbac`) *(stretch)*
+### Phase 10 — PBAC *(stretch)*
 
-**Build:**
-- A minimal policy engine: policies stored in SQLite as structured rules
-- `PolicyAuthorizer`: evaluates applicable policies, returns permit/deny/not-applicable
-- Conflict resolution: deny-overrides vs permit-overrides
+**Scope tag:** `authz-pbac`
 
-**Learn:**
-- How enterprise PAM/IAM systems think about policy
-- ReBAC (Relationship-Based Access Control) as a direction beyond ABAC (e.g. Google Zanzibar)
+**Build:** policy engine with structured rules in SQLite, conflict resolution (deny-overrides)
+
+**Learn:** enterprise PAM/IAM thinking, ReBAC and Google Zanzibar as a direction beyond ABAC
 
 ---
 
-## 4. Learning Structure Per New Concept
+## 5. Learning Structure Per New Concept
 
-Whenever a new concept is introduced, it is presented in this order — no diverging into tangents:
+For every new concept introduced, exactly this structure — no diverging:
 
-1. **Plain English** — what it is in one sentence, no jargon
-2. **Real-world analogy** — a concrete, non-technical parallel that maps cleanly
+1. **Plain English** — one sentence, no jargon
+2. **Real-world analogy** — a concrete non-technical parallel that maps cleanly
 3. **Why it exists** — what problem preceded it, what broke without it
 4. **How it works** — mechanism, not just interface
-5. **Pitfalls** — what goes wrong when it's misused or absent
-6. **Related / variant concepts** — briefly named, with a note on when they're relevant instead
-7. **Where it fits in our project** — zoom out to the bigger auth picture
-8. **Python specifics** — any stdlib behaviour, gotcha, or idiom worth knowing for this concept
+5. **Pitfalls** — what goes wrong when misused or absent
+6. **Related / variant concepts** — briefly named, with a note on when each applies instead
+7. **Where it fits** — zoom out to the bigger auth picture
+8. **Python specifics** — stdlib behaviour, gotcha, or idiom relevant to this concept
 
-If a tangent topic is intriguing but not the focus, it gets: one sentence naming it, and a `# TODO: revisit in Phase N` comment. No more.
+If a tangent is intriguing but off-topic: one sentence naming it, a `# TODO(PhaseN): revisit` comment. No more.
 
 ---
 
-## 5. Pre-Commit Hook Configuration (reference)
+## 6. Immediate Next Steps (Phase 0 completion)
 
-```yaml
-# .pre-commit-config.yaml
-repos:
-  - repo: https://github.com/astral-sh/ruff-pre-commit
-    rev: v0.4.4
-    hooks:
-      - id: ruff
-        args: [--fix]
-      - id: ruff-format
+```powershell
+# From auth_engine project root
 
-  - repo: https://github.com/pre-commit/mirrors-mypy
-    rev: v1.10.0
-    hooks:
-      - id: mypy
-        args: [--strict]
-        additional_dependencies: []  # no stubs needed — stdlib only
+# 1. Delete the uv init default (flat layout)
+Remove-Item main.py
 
-  - repo: local
-    hooks:
-      - id: pytest-fast
-        name: pytest (unit tests only)
-        entry: uv run pytest tests/unit/ -q --tb=short
-        language: system
-        pass_filenames: false
-        stages: [pre-commit]
+# 2. Run the scaffold script to create the directory structure
+.\scaffold.ps1    # (or create dirs manually — see scaffold.ps1)
+
+# 3. Replace pyproject.toml with the corrected version
+# 4. Add .pre-commit-config.yaml
+
+# 5. Add detect-secrets as a dev dep and generate baseline
+uv add --dev detect-secrets
+uv run detect-secrets scan > .secrets.baseline
+
+# 6. Install pre-commit hooks
+pre-commit install
+
+# 7. Add the src layout package to uv (editable install)
+uv pip install -e .
+
+# 8. Run hooks — should pass clean
+pre-commit run --all-files
+
+# 9. Smoke test the server
+uv run python -m auth_engine.web.server
+# → open http://127.0.0.1:8080/login in browser
 ```
 
 ---
 
-## 6. `pyproject.toml` Skeleton (reference)
+## 7. What Success Looks Like
 
-```toml
-[project]
-name = "authforge"
-version = "0.1.0"
-requires-python = ">=3.13"
-dependencies = []
+By the end you can, without notes:
 
-[tool.uv]
-dev-dependencies = [
-    "ruff>=0.4",
-    "mypy>=1.10",
-    "pytest>=8.0",
-    "pytest-cov>=5.0",
-    "pre-commit>=3.7",
-]
-
-[tool.ruff]
-target-version = "py313"
-line-length = 88
-select = ["E", "W", "F", "N", "C90", "D", "ANN", "S", "SIM", "UP"]
-ignore = ["D203", "D212"]  # conflict with Google docstring style
-
-[tool.ruff.pydocstyle]
-convention = "google"
-
-[tool.ruff.mccabe]
-max-complexity = 10
-
-[tool.mypy]
-strict = true
-python_version = "3.13"
-
-[tool.pytest.ini_options]
-testpaths = ["tests"]
-addopts = "--cov=src/authforge --cov-report=term-missing -q"
-```
-
----
-
-## 7. First Steps — Ordered
-
-Execute these in order before writing any auth logic:
-
-```bash
-# 1. Initialise project
-uv init authforge -p 3.13
-cd authforge
-
-# 2. Add dev deps
-uv add --dev ruff mypy pytest pytest-cov pre-commit
-
-# 3. Create src layout
-mkdir -p src/authforge tests/unit tests/integration tests/regression
-
-# 4. Install pre-commit hooks
-uv run pre-commit install
-
-# 5. Verify hook runs clean on an empty project
-uv run pre-commit run --all-files
-
-# 6. First commit
-git add .
-git commit -m "chore(scaffold): initialise uv project with ruff, mypy, pre-commit"
-```
-
----
-
-## 8. What Success Looks Like
-
-By the end of this project you will be able to:
-
-- Explain, without notes, why salted PBKDF2 is used instead of `SHA256(password)`
-- Implement HMAC-SHA256 from a description of the algorithm, not from memory
+- Explain why salted PBKDF2 is used instead of `SHA256(password)`
+- Implement HMAC-SHA256 from a verbal description of the algorithm
 - Read a raw JWT string and decode all three parts by hand
-- Explain the OAuth2 authorization code flow, step-by-step, including what PKCE prevents
-- Articulate the difference between RBAC and ABAC and choose the right one for a given requirement
-- Write a Python module with full type annotations, Google docstrings, and a test suite that a stranger could read and trust
+- Explain the OAuth2 authorization code flow step-by-step, including what PKCE prevents
+- Choose between RBAC and ABAC for a given authorization requirement and justify the choice
+- Write a Python module with full type annotations, Google docstrings, and a test suite a stranger could read and trust
 
 ---
 
-*Document version: 0.1 — living document, updated at the start of each phase.*
+*Document version: 0.2 — updated after Phase 0 clarifications. Living document: updated at the start of each phase.*

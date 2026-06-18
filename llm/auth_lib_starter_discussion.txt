@@ -113,3 +113,115 @@ Some things I felt I left out, that I'm reaching out for, back again...
 - shouldn't the Client setup (login client, with those 2 other pages) be also done maybe, as part of the initial phase then?
 
 Showing the results of phase-0 partial results, waiting for other confirmations to proceed further!
+
+```powershell
+(auth_engine) PS C:\Users\rinzler\Documents\learning\python\auth_engine> uv add --dev ruff mypy pytest pytest-cov pre-commit
+Resolved 26 packages in 1m 04s
+Prepared 25 packages in 4m 11s
+Installed 25 packages in 3.07s
+ + ast-serialize==0.5.0
+ + cfgv==3.5.0
+ + colorama==0.4.6
+ + coverage==7.14.1
+ + distlib==0.4.3
+ + filelock==3.29.4
+ + identify==2.6.19
+ + iniconfig==2.3.0
+ + librt==0.11.0
+ + mypy==2.1.0
+ + mypy-extensions==1.1.0
+ + nodeenv==1.10.0
+ + packaging==26.2
+ + pathspec==1.1.1
+ + platformdirs==4.10.0
+ + pluggy==1.6.0
+ + pre-commit==4.6.0
+ + pygments==2.20.0
+ + pytest==9.1.0
+ + pytest-cov==7.1.0
+ + python-discovery==1.4.2
+ + pyyaml==6.0.3
+ + ruff==0.15.17
+ + typing-extensions==4.15.0
+ + virtualenv==21.5.1
+(auth_engine) PS C:\Users\rinzler\Documents\learning\python\auth_engine> git add .\llm\auth_lib_starter_discussion.txt
+(auth_engine) PS C:\Users\rinzler\Documents\learning\python\auth_engine> git commit -m 'infra(meta proj-setup): llm conversations to setup and get started with the project implementation\!'
+[main (root-commit) 4e21c89] infra(meta proj-setup): llm conversations to setup and get started with the project implementation\!
+ 1 file changed, 115 insertions(+)
+ create mode 100644 llm/auth_lib_starter_discussion.txt
+(auth_engine) PS C:\Users\rinzler\Documents\learning\python\auth_engine> git push origin main
+Enumerating objects: 4, done.
+Counting objects: 100% (4/4), done.
+Delta compression using up to 16 threads
+Compressing objects: 100% (3/3), done.
+Writing objects: 100% (4/4), 4.18 KiB | 2.09 MiB/s, done.
+Total 4 (delta 0), reused 0 (delta 0), pack-reused 0 (from 0)
+To github.com:Guy-Ritchie/auth_engine.git
+ * [new branch]      main -> main
+ (auth_engine) PS C:\Users\rinzler\Documents\learning\python\auth_engine> pre-commit install
+pre-commit installed at .git\hooks\pre-commit
+(auth_engine) PS C:\Users\rinzler\Documents\learning\python\auth_engine> pre-commit run --all-files
+[INFO] Initializing environment for https://github.com/astral-sh/ruff-pre-commit.
+[INFO] Initializing environment for https://github.com/pre-commit/mirrors-mypy.
+[INFO] Installing environment for https://github.com/astral-sh/ruff-pre-commit.
+[INFO] Once installed this environment will be reused.
+[INFO] This may take a few minutes...
+[INFO] Installing environment for https://github.com/pre-commit/mirrors-mypy.
+[INFO] Once installed this environment will be reused.
+[INFO] This may take a few minutes...
+ruff.................................................(no files to check)Skipped
+ruff-format..........................................(no files to check)Skipped
+mypy.................................................(no files to check)Skipped
+pytest (unit tests only).................................................Failed
+- hook id: pytest-fast
+- exit code: 5
+
+C:\Users\rinzler\Documents\learning\python\auth_engine\.venv\Lib\site-packages\coverage\inorout.py:561: CoverageWarning: Module src/auth_engine was never imported. (module-not-imported); see https://coverage.readthedocs.io/en/7.14.1/messages.html#warning-module-not-imported
+  self.warn(f"Module {pkg} was never imported.", slug="module-not-imported")
+C:\Users\rinzler\Documents\learning\python\auth_engine\.venv\Lib\site-packages\coverage\control.py:958: CoverageWarning: No data was collected. (no-data-collected); see https://coverage.readthedocs.io/en/7.14.1/messages.html#warning-no-data-collected
+  self._warn("No data was collected.", slug="no-data-collected")
+C:\Users\rinzler\Documents\learning\python\auth_engine\.venv\Lib\site-packages\pytest_cov\plugin.py:366: CovReportWarning: Failed to generate report: No data to report.
+
+  warnings.warn(CovReportWarning(message), stacklevel=1)
+
+WARNING: Failed to generate report: No data to report.
+
+(auth_engine) PS C:\Users\rinzler\Documents\learning\python\auth_engine>type pyproject.toml
+[project]
+name = "auth-engine"
+version = "0.1.0"
+description = "Add your description here"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "mypy>=2.1.0",
+    "pre-commit>=4.6.0",
+    "pytest>=9.1.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.17",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+select = [ "E", "W", "F", "N", "C90", "D", "ANN", "S", "SIM", "UP"]
+ignore = ["D203", "D212"] # conflict with Google docstring style
+
+[tool.ruff.pydocstyle]
+convention="google"
+
+[tool.ruff.mccabe]
+max-complexity=10
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--cov=src/auth_engine --cov-report=term-missing -q"
+(auth_engine) PS C:\Users\rinzler\Documents\learning\python\auth_engine>
+```
