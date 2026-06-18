@@ -1,0 +1,80 @@
+[project]
+name = "auth-engine"
+version = "0.1.0"
+description = "Auth(orization & entication) from first principles - python 3.13"
+readme = "README.md"
+requires-python = ">=3.13"
+dependencies = []
+
+[dependency-groups]
+dev = [
+    "detect-secrets>=1.5.0",
+    "mypy>=2.1.0",
+    "pre-commit>=4.6.0",
+    "pytest>=9.1.0",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.17",
+]
+
+[tool.ruff]
+target-version = "py313"
+line-length = 88
+
+[tool.ruff.lint]
+# Rule sets enabled:
+#   E/W  — pycodestyle errors & warnings
+#   F    — pyflakes (undefined names, unused imports, etc.)
+#   N    — pep8-naming (enforces our naming conventions)
+#   C90  — mccabe complexity
+#   D    — pydocstyle (Google docstring convention)
+#   ANN  — type annotation enforcement
+#   S    — bandit security checks (critical for a security-focused project)
+#   SIM  — simplify redundant constructs
+#   UP   — pyupgrade (use modern Python syntax)
+#   I    — isort-compatible import ordering
+#   TID  — import discipline (ban relative imports via TID252)
+select = [
+"E", "W",
+"F",
+"N",
+"C90",
+"D",
+"ANN",
+"S",
+"SIM",
+"UP",
+"I",
+"TID",
+]
+ignore = [
+"D203",  # one-blank-line-before-class  (conflicts with Google style D211)
+"D212"  # multi-line-summary-second-line (conflicts with Google style D212)
+] # conflict with Google docstring style
+
+[tool.ruff.lint.pydocstyle]
+convention="google"
+
+[tool.ruff.lint.mccabe]
+max-complexity=10
+
+[tool.mypy]
+strict = true
+python_version = "3.13"
+mypy_path = "src"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+# --no-cov-on-fail : don't produce a coverage report if tests fail
+# -q               : quiet output
+# -p no:warnings   : suppress coverage warnings when no tests exist yet
+#                    (remove once the first real test is written)
+addopts = "--cov=auth_engine --cov-report=term-missing -q --no-cov-on-fail"
+ 
+[tool.coverage.run]
+source = ["src/auth_engine"]
+ 
+[tool.coverage.report]
+# Don't fail coverage just because there are no tests yet — Phase 0 is setup only.
+# Raise this threshold progressively: 50 in Phase 1, 70 in Phase 2, 85+ thereafter.
+fail_under = 0
+ 
