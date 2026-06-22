@@ -48,7 +48,7 @@ select = [
 ]
 ignore = [
 "D203",  # one-blank-line-before-class  (conflicts with Google style D211)
-"D212"  # multi-line-summary-second-line (conflicts with Google style D212)
+"D212",  # multi-line-summary-second-line (conflicts with Google style D212)
 ] # conflict with Google docstring style
 
 [tool.ruff.lint.per-file-ignores]
@@ -61,6 +61,10 @@ convention="google"
 
 [tool.ruff.lint.mccabe]
 max-complexity=10
+
+[tool.ruff.lint.flake8-tidy-imports]
+# Enforce absolute imports everywhere - no relative imports allowed.
+ban-relative-imports = "all"
 
 [tool.mypy]
 strict = true
